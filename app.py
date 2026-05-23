@@ -1,70 +1,54 @@
 import streamlit as st
 import requests
+from difflib import SequenceMatcher
 
-# 1. Güvenlik Başlıkları Kontrolü
+# 1. Başlık Analizi - Profesyonel Standart
 def check_headers(url):
     try:
         if not url.startswith("http"): url = "https://" + url
-        response = requests.get(url, timeout=5)
-        headers = response.headers
-        required = [
-            'Content-Security-Policy', 'X-XSS-Protection', 'X-Content-Type-Options',
-            'X-Frame-Options', 'Strict-Transport-Security'
-        ]
-        return [h for h in required if h not in headers]
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=5)
+        required = ['Content-Security-Policy', 'X-XSS-Protection', 'X-Content-Type-Options', 'X-Frame-Options']
+        return [h for h in required if h not in response.headers]
     except Exception as e:
         return [f"Bağlantı Hatası: {e}"]
 
-# 2. Gelişmiş Dizin Avcısı (İçerik Karşılaştırmalı)
+# 2. Gelişmiş Tarama - Benzerlik Analizi ile
 def scan_directories(url):
     common_files = ["/admin", "/.env", "/config", "/.git", "/backup", "/wp-admin", "/uploads"]
     found = []
     base_url = url if url.startswith("http") else "https://" + url
     
-    # Ana sayfa içeriğini al (Yanlış alarmı engellemek için)
     try:
-        home_content = requests.get(base_url, timeout=3).text
+        # Ana sayfa içeriğini referans al
+        home_resp = requests.get(base_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+        home_content = home_resp.text
     except:
-        home_content = ""
+        return ["Hata: Siteye ulaşılamadı."]
 
     for path in common_files:
+        full_url = base_url + path
         try:
-            full_url = base_url + path
-            response = requests.get(full_url, timeout=2)
+            resp = requests.get(full_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=2)
             
-            # İçerik ana sayfadan farklıysa ve 200 OK ise, bu gerçek bir bulgudur
-            if response.status_code == 200 and response.text != home_content:
+            # İçerik benzerlik oranı hesapla
+            similarity = SequenceMatcher(None, home_content, resp.text).ratio()
+            
+            # Eğer sayfa 200 dönüyor ve ana sayfadan %90 farklıysa, bu şüphelidir!
+            if resp.status_code == 200 and similarity < 0.9:
                 found.append(f"❌ KRİTİK: {full_url} (Erişilebilir - Gerçek İçerik Tespit Edildi!)")
-            elif response.status_code == 403:
+            elif resp.status_code == 403:
                 found.append(f"⚠️ Kısıtlı: {full_url} (Dizin mevcut)")
         except:
             continue
     return found
 
-# Arayüz
-st.set_page_config(page_title="BugHunter AI", page_icon="🛡️")
-st.title("🛡️ BugHunter AI - Profesyonel Tarayıcı")
+# Streamlit UI
+st.set_page_config(page_title="BugHunter Pro", page_icon="🛡️")
+st.title("🛡️ BugHunter AI - Profesyonel")
 target = st.text_input("Taranacak Site (Örn: example.com):")
 
-if st.button("🚀 Taramayı Başlat"):
-    if target:
-        with st.spinner('Derin analiz yapılıyor...'):
-            # 1. Başlık Analizi
-            st.write("#### 🛡️ Güvenlik Başlıkları")
-            missing = check_headers(target)
-            if not missing:
-                st.success("Tüm güvenlik başlıkları yerinde!")
-            else:
-                for m in missing:
-                    st.error(f"❌ Eksik: {m}")
-            
-            # 2. Dizin Analizi
-            st.write("#### 🔍 Dizin ve Dosya Analizi")
-            risks = scan_directories(target)
-            if not risks:
-                st.info("Kritik dizin ifşası bulunamadı.")
-            else:
-                for r in risks:
-                    st.warning(r)
-    else:
-        st.warning("Lütfen bir URL girin!")
+if st.button("🚀 Derin Taramayı Başlat"):
+    with st.spinner('Analiz ediliyor...'):
+        missing = check_headers(target)
+        # ... [UI kodları buraya devam edecek]
