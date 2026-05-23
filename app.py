@@ -2,53 +2,73 @@ import streamlit as st
 import requests
 from difflib import SequenceMatcher
 
-# 1. Başlık Analizi - Profesyonel Standart
+# 1. Profesyonel Başlık Analizi
 def check_headers(url):
+    results = {}
     try:
+        # Protokolü düzelt
         if not url.startswith("http"): url = "https://" + url
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(url, headers=headers, timeout=5)
+        
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+        response = requests.get(url, headers=headers, timeout=10)
+        
         required = ['Content-Security-Policy', 'X-XSS-Protection', 'X-Content-Type-Options', 'X-Frame-Options']
-        return [h for h in required if h not in response.headers]
+        for h in required:
+            results[h] = h in response.headers
+        return results, None
+    except Exception as e:
+        return None, str(e)
+
+# 2. Hata Ayıklamalı Dizin Tarayıcı
+def scan_directories(url):
+    # Eğer http yoksa ekle
+    base_url = url if url.startswith("http") else "https://" + url
+    common_files = ["/admin", "/.env", "/config", "/.git", "/backup", "/wp-admin", "/uploads"]
+    
+    found = []
+    try:
+        # Ana sayfa referansını al
+        resp_home = requests.get(base_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        home_text = resp_home.text
     except Exception as e:
         return [f"Bağlantı Hatası: {e}"]
 
-# 2. Gelişmiş Tarama - Benzerlik Analizi ile
-def scan_directories(url):
-    common_files = ["/admin", "/.env", "/config", "/.git", "/backup", "/wp-admin", "/uploads"]
-    found = []
-    base_url = url if url.startswith("http") else "https://" + url
-    
-    try:
-        # Ana sayfa içeriğini referans al
-        home_resp = requests.get(base_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
-        home_content = home_resp.text
-    except:
-        return ["Hata: Siteye ulaşılamadı."]
-
     for path in common_files:
-        full_url = base_url + path
         try:
-            resp = requests.get(full_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=2)
+            target_url = base_url.rstrip('/') + path
+            resp = requests.get(target_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
             
-            # İçerik benzerlik oranı hesapla
-            similarity = SequenceMatcher(None, home_content, resp.text).ratio()
+            # Benzerlik analizi (0.9'dan düşükse içerik farklıdır)
+            sim = SequenceMatcher(None, home_text, resp.text).ratio()
             
-            # Eğer sayfa 200 dönüyor ve ana sayfadan %90 farklıysa, bu şüphelidir!
-            if resp.status_code == 200 and similarity < 0.9:
-                found.append(f"❌ KRİTİK: {full_url} (Erişilebilir - Gerçek İçerik Tespit Edildi!)")
+            if resp.status_code == 200 and sim < 0.9:
+                found.append(f"❌ KRİTİK: {target_url} (İçerik Farklı!)")
             elif resp.status_code == 403:
-                found.append(f"⚠️ Kısıtlı: {full_url} (Dizin mevcut)")
+                found.append(f"⚠️ Kısıtlı: {target_url} (Erişim Engelli)")
         except:
             continue
     return found
 
-# Streamlit UI
-st.set_page_config(page_title="BugHunter Pro", page_icon="🛡️")
-st.title("🛡️ BugHunter AI - Profesyonel")
-target = st.text_input("Taranacak Site (Örn: example.com):")
+# Arayüz
+st.title("🛡️ BugHunter AI - Debug Mod")
+target = st.text_input("Taranacak Site (Örn: google.com):")
 
-if st.button("🚀 Derin Taramayı Başlat"):
-    with st.spinner('Analiz ediliyor...'):
-        missing = check_headers(target)
-        # ... [UI kodları buraya devam edecek]
+if st.button("🚀 Taramayı Başlat"):
+    if not target:
+        st.error("Lütfen bir site gir!")
+    else:
+        # 1. Başlık Kontrolü
+        headers, err = check_headers(target)
+        if err:
+            st.error(f"SİTEYE ULAŞILAMADI: {err}")
+        else:
+            st.write("#### 🛡️ Güvenlik Başlıkları")
+            for h, status in headers.items():
+                if status: st.success(f"✅ {h} Bulundu")
+                else: st.error(f"❌ {h} Eksik")
+
+        # 2. Dizin Kontrolü
+        st.write("#### 🔍 Dizin Analizi")
+        risks = scan_directories(target)
+        for r in risks:
+            st.warning(r)
